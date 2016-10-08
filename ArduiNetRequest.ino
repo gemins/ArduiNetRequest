@@ -1,5 +1,5 @@
-// Demo using DHCP and DNS to perform a web client request.
-// 2011-06-08 <jc@wippler.nl> http://opensource.org/licenses/mit-license.php
+// Connect to ethernet with DHCP, send and track packets with response.
+// 2016-08-10 <info@gemins.com.ar> http://opensource.org/licenses/mit-license.php
 
 #include <EtherCard.h>
 #include <ArduinoJson.h>
