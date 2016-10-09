@@ -3,77 +3,62 @@
 
 #include <EtherCard.h>
 #include <ArduinoJson.h>
+#include <DHT11.h>
 #include <EEPROM.h>
-/** the current address in the EEPROM (i.e. which byte we're going to write to next) **/
-int idPos = 0;
-byte idDevice;
-// ethernet interface mac address, must be unique on the LAN
-static byte mymac[] = { 0x74,0x69,0x69,0x2D,0x30,0x31 };
 
-#define BUFFERSIZE 500
-byte Ethernet::buffer[BUFFERSIZE];
+/** EEPROM Vars **/
+  int idPos = 0;
+  byte idDevice;
+/** END EEPROM Vars**/
 
-static uint32_t timer;
+/*Ethernet Configuration and Vars*/
+  // ethernet interface mac address, must be unique on the LAN
+  static byte mymac[] = { 0x74,0x69,0x69,0x2D,0x30,0x31 };
+  //Size of buffer
+  #define BUFFERSIZE 500
+  byte Ethernet::buffer[BUFFERSIZE];
+  uint32_t nextSeq;
+  char fullResponse[BUFFERSIZE - 200];
+  const char website[] PROGMEM = "atm.gemins.com.ar";
+/*END Ethernet Configuration and Vars*/
 
-uint32_t nextSeq;
-char fullResponse[BUFFERSIZE - 200];
+/** PINS Config and Vars **/
+  int pinTemp = 2;
+  DHT11 dht11(pinTemp);
 
-const char website[] PROGMEM = "atm.gemins.com.ar";
+/** END PINS Config and Vars **/
 
-// called when the client request is complete
-static void getDevices (byte status, word off, word len, word test) {
-  Serial.println(">>>");
-  //Serial.println(status);
-  //Ethernet::buffer[len] = off;
-  char* fullResponse;
-  fullResponse = (char*) Ethernet::buffer + 294;
-  String str = String(fullResponse);
-  //Serial.println( (char*) Ethernet::buffer + 294);
-  char json[str.length()];
-  str.toCharArray(json, str.length() + 1);
-  
-  StaticJsonBuffer<200> jsonBuffer;
-  JsonObject& root = jsonBuffer.parseObject(fullResponse);
-  if (!root.success())
-  {
-    Serial.println("parseObject() failed");
-    return;
-  }
-  //root.printTo(Serial);
-  const char* name = root["name"];
-  const char* time = root["create_at"];
-  const char* id = root["id"];
-  const char* user_id = root["user_id"];
-
-  EEPROM.write(idPos, id);
-}
-
+/** Function to parse a Json data from Server **/
 void getJson(){
-  //Serial.println( (char*) Ethernet::buffer + 294);
-  //char json[response.length()];
-  //response.toCharArray(json, response.length() + 1);
-  
   StaticJsonBuffer<200> jsonBuffer;
   JsonObject& root = jsonBuffer.parseObject(fullResponse);
+ 
   if (!root.success())
   {
     Serial.println("parseObject() failed");
-    return;
+    memset(fullResponse, 0, sizeof(fullResponse));
+  }else{
+    setDataDevices(root);
   }
-  //root.printTo(Serial);
-  const char* name = root["ixd"]["name"];
-  const char* time = root["ixd"]["create_at"];
-  const char* id = root["ixd"]["id"];
-  const char* user_id = root["ixd"]["user_id"];
-
-  Serial.print("ID: ");
-  Serial.println(id);
-  memset(fullResponse, 0, sizeof(fullResponse));
-
-  EEPROM.write(idPos, id);
 }
 
-// called when the client request is complete
+/** Function to get and set new data from server **/
+static void setDataDevices(JsonObject& objJson){
+  const uint16_t id = objJson["ixd"]["id"];
+
+  Serial.print(id);
+
+  if(id != "" and (!idDevice or EEPROM.read(idPos) != id)){
+    Serial.print("change id");
+    EEPROM.put(idPos, id);
+  }else{
+    Serial.print("NOT change id");
+  }
+  
+  memset(fullResponse, 0, sizeof(fullResponse));
+}
+
+/** Function to get Response data from server when make a GET **/
 static void getResponse (byte status, word off, word len) {
   char* tempBuffer;
     
@@ -112,25 +97,8 @@ static void getResponse (byte status, word off, word len) {
   if(payloadlength < 512){
     tempBuffer[0] = 0;tempBuffer[off+len] = 0;
     Serial.println(fullResponse);
-    Serial.println();
     getJson();
   }
-
-  /*
-  String str = String(fullResponse);
-  char json[str.length()];
-  str.toCharArray(json, str.length() + 1);
- 
-  StaticJsonBuffer<200> jsonBuffer;
-  JsonObject& root = jsonBuffer.parseObject(fullResponse);
-  if (!root.success())
-  {
-    Serial.println(fullResponse);
-    Serial.println("parseObject() failed");
-    return;
-  }
-  root.printTo(Serial);
-  */
 }
 
 void setup () {
@@ -152,20 +120,55 @@ void setup () {
   ether.printIp("SRV: ", ether.hisip);
 
   ether.persistTcpConnection(true);
+  memset(fullResponse, 0, sizeof(fullResponse));
 
-  //idDevice = EEPROM.read(idPos);
   //if(!idDevice)
-  //  Serial.println("Not have id yet");
-  //else
-  //  Serial.println(idDevice);
+  //  EEPROM.write(idPos,6);
+
 }
 
 void loop () {
   ether.packetLoop(ether.packetReceive());
-  
-  if (millis() > timer) {
+
+  static uint32_t timer =  0;
+  if (millis() > timer && strlen(fullResponse) == 0) {
+    char varSend[50];
+    idDevice = EEPROM.read(idPos);
+    Serial.print("ID actual: "); Serial.println(idDevice);
+    
     timer = millis() + 10000;
-    Serial.println("GET:");
-    ether.browseUrl(PSTR("/devices/"), "9", website, getResponse);
+
+    int err;
+    float temp, hum;
+    
+    if((err = dht11.read(hum, temp)) == 0)    // Si devuelve 0 es que ha leido bien
+    {
+      Serial.print("Temperatura: ");
+      Serial.print(temp);
+      Serial.print(" Humedad: ");
+      Serial.print(hum);
+      Serial.println();
+      //If id devices is not set, create a new devices on web and get data.
+
+      char* wanIp = sprintf("%c.%c.%s.%s", ether.hisip[0],ether.hisip[1],ether.hisip[2],ether.hisip[3]);
+      //Serial.println(wanIp);
+
+      int T(temp);
+      int H(hum);
+      
+      if(!idDevice)
+        sprintf(varSend, "create?ip=%s", wanIp);
+      else //else if devices have id, connect to server to send and recive data.
+        sprintf(varSend, "%d/update_sensor?temperature=%d&humidity=%d&ip=%s", idDevice, T, H, wanIp);
+      
+      Serial.println(varSend);
+      
+      ether.browseUrl(PSTR("/devices/"), varSend, website, getResponse);
+    }else{
+       Serial.println();
+       Serial.print("Error Num :");
+       Serial.print(err);
+       Serial.println();
+    }    
   }
 }
