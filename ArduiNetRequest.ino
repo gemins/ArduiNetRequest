@@ -61,10 +61,10 @@ void getJson(){
     return;
   }
   //root.printTo(Serial);
-  const char* name = root["name"];
-  const char* time = root["create_at"];
-  const char* id = root["id"];
-  const char* user_id = root["user_id"];
+  const char* name = root["ixd"]["name"];
+  const char* time = root["ixd"]["create_at"];
+  const char* id = root["ixd"]["id"];
+  const char* user_id = root["ixd"]["user_id"];
 
   Serial.print("ID: ");
   Serial.println(id);
