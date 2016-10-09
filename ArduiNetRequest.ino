@@ -10,13 +10,13 @@ byte idDevice;
 // ethernet interface mac address, must be unique on the LAN
 static byte mymac[] = { 0x74,0x69,0x69,0x2D,0x30,0x31 };
 
-byte Ethernet::buffer[700];
+#define BUFFERSIZE 500
+byte Ethernet::buffer[BUFFERSIZE];
 
 static uint32_t timer;
-String fullResponse;
-String newResponse;
 
-#define HTTP_HEADER_OFFSET 0
+uint32_t nextSeq;
+char fullResponse[BUFFERSIZE - 200];
 
 const char website[] PROGMEM = "atm.gemins.com.ar";
 
@@ -48,29 +48,72 @@ static void getDevices (byte status, word off, word len, word test) {
   EEPROM.write(idPos, id);
 }
 
-// called when the client request is complete
-static void createDevices (byte status, word off, word len, word delaycnt) {
-  newResponse = Ethernet::buffer + off;
-  if(status == 0){
-    fullResponse = Ethernet::buffer + off + newResponse.indexOf("application/json") + 20;
-    String str(fullResponse);
-    Serial.println(fullResponse);
-  }else{
-    String str(newResponse);
-    fullResponse = fullResponse + newResponse;
-    Serial.println(fullResponse);
+void getJson(){
+  //Serial.println( (char*) Ethernet::buffer + 294);
+  //char json[response.length()];
+  //response.toCharArray(json, response.length() + 1);
+  
+  StaticJsonBuffer<200> jsonBuffer;
+  JsonObject& root = jsonBuffer.parseObject(fullResponse);
+  if (!root.success())
+  {
+    Serial.println("parseObject() failed");
+    return;
   }
- char* lastChar;
- lastChar = (char *) Ethernet::buffer + len + off - 1;
- //Serial.println(fullResponse);
- //Serial.println(newResponse.indexOf("application/json"));
- 
+  //root.printTo(Serial);
+  const char* name = root["name"];
+  const char* time = root["create_at"];
+  const char* id = root["id"];
+  const char* user_id = root["user_id"];
 
+  Serial.print("ID: ");
+  Serial.println(id);
+  memset(fullResponse, 0, sizeof(fullResponse));
+
+  EEPROM.write(idPos, id);
+}
+
+// called when the client request is complete
+static void getResponse (byte status, word off, word len) {
+  char* tempBuffer;
+    
+  if (strncmp_P((char*) Ethernet::buffer+off,PSTR("HTTP"),4) == 0) {
+    nextSeq = ether.getSequenceNumber();
+    memset(fullResponse, 0, sizeof(fullResponse));
+  }
  
-  if(lastChar[0] == ']' ){
-    Serial.println("Yeah!");
-    Serial.println(newResponse);
+  if (nextSeq != ether.getSequenceNumber()) { Serial.print(F("<IGNORE DUPLICATE(?) PACKET>")); return; }
+    
+  uint16_t payloadlength = ether.getTcpPayloadLength();
+  int16_t chunk_size   = BUFFERSIZE-off-1;
+  int16_t char_written = 0;
+  int16_t char_in_buf  = chunk_size < payloadlength ? chunk_size : payloadlength;
+  
+  while (char_written < payloadlength) {
+    String newResponse = Ethernet::buffer + off;
+    int findIxd = newResponse.indexOf("ixd");
+    
+    if(strlen(fullResponse) == 0 && findIxd > 0){
+      tempBuffer = Ethernet::buffer + off + findIxd - 2; 
+    }
+    
+    if(strlen(fullResponse) > 0){
+      tempBuffer = Ethernet::buffer + off;
+    }
+    
+    sprintf(fullResponse, "%s%s", fullResponse, tempBuffer);
+    
+    char_written += char_in_buf;
+    char_in_buf = ether.readPacketSlice((char*) Ethernet::buffer+off,chunk_size,off+char_written);
+  }
+
+  nextSeq += ether.getTcpPayloadLength();
+
+  if(payloadlength < 512){
+    tempBuffer[0] = 0;tempBuffer[off+len] = 0;
     Serial.println(fullResponse);
+    Serial.println();
+    getJson();
   }
 
   /*
@@ -91,7 +134,7 @@ static void createDevices (byte status, word off, word len, word delaycnt) {
 }
 
 void setup () {
-  Serial.begin(9600);
+  Serial.begin(57600);
   Serial.println(F("[webClient]"));
   
   if (ether.begin(sizeof Ethernet::buffer, mymac) == 0) 
@@ -108,22 +151,21 @@ void setup () {
     
   ether.printIp("SRV: ", ether.hisip);
 
-  //ether.persistTcpConnection(true);
+  ether.persistTcpConnection(true);
 
-  idDevice = EEPROM.read(idPos);
-  if(!idDevice)
-    Serial.println("Not have id yet");
-  else
-    Serial.println(idDevice);
+  //idDevice = EEPROM.read(idPos);
+  //if(!idDevice)
+  //  Serial.println("Not have id yet");
+  //else
+  //  Serial.println(idDevice);
 }
 
 void loop () {
   ether.packetLoop(ether.packetReceive());
   
   if (millis() > timer) {
-    timer = millis() + 30000;
-    Serial.println();
-    ether.browseUrl(PSTR("/devices"), "/9", website, createDevices);
-    ether.persistTcpConnection(true);
+    timer = millis() + 10000;
+    Serial.println("GET:");
+    ether.browseUrl(PSTR("/devices/"), "9", website, getResponse);
   }
 }
