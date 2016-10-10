@@ -45,16 +45,12 @@ void getJson(){
 /** Function to get and set new data from server **/
 static void setDataDevices(JsonObject& objJson){
   const uint16_t id = objJson["ixd"]["id"];
-
-  Serial.print(id);
-
-  if(id != "" and (!idDevice or EEPROM.read(idPos) != id)){
+  if(!idDevice and EEPROM.read(idPos) != id){
     Serial.print("change id");
     EEPROM.put(idPos, id);
   }else{
     Serial.print("NOT change id");
   }
-  
   memset(fullResponse, 0, sizeof(fullResponse));
 }
 
@@ -85,6 +81,8 @@ static void getResponse (byte status, word off, word len) {
     if(strlen(fullResponse) > 0){
       tempBuffer = Ethernet::buffer + off;
     }
+
+    //Serial.write(tempBuffer = Ethernet::buffer + off, char_in_buf);
     
     sprintf(fullResponse, "%s%s", fullResponse, tempBuffer);
     
@@ -150,16 +148,16 @@ void loop () {
       Serial.println();
       //If id devices is not set, create a new devices on web and get data.
 
-      char* wanIp = sprintf("%c.%c.%s.%s", ether.hisip[0],ether.hisip[1],ether.hisip[2],ether.hisip[3]);
+      //char* wanIp = sprintf("%c.%c.%s.%s", ether.hisip[0],ether.hisip[1],ether.hisip[2],ether.hisip[3]);
       //Serial.println(wanIp);
 
       int T(temp);
       int H(hum);
       
       if(!idDevice)
-        sprintf(varSend, "create?ip=%s", wanIp);
+        sprintf(varSend, "create?ip=%s", H);
       else //else if devices have id, connect to server to send and recive data.
-        sprintf(varSend, "%d/update_sensor?temperature=%d&humidity=%d&ip=%s", idDevice, T, H, wanIp);
+        sprintf(varSend, "%d/update_sensor?temperature=%d&humidity=%d&ip=%s", idDevice, T, H, H);
       
       Serial.println(varSend);
       
